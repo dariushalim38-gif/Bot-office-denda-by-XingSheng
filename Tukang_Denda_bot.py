@@ -357,11 +357,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/absen_istirahat_siang - Kembali dr istirahat siang (max 12:00)\n"
         "/istirahat_sore_mulai - Mulai istirahat sore (17:00-17:59)\n"
         "/absen_istirahat_sore - Kembali dr istirahat sore (max 18:00)\n"
-        "/toilet - Izin toilet (10 menit, max 6x/hari)\n"
-        "/rokok - Izin rokok (5 menit, max 6x/hari)\n"
+        "/toilet 🚽 - Izin toilet (10 menit, max 6x/hari)\n"
+        "/rokok 🚬 - Izin rokok (5 menit, max 6x/hari)\n"
         "/selesai_toilet - Selesai izin toilet\n"
         "/selesai_rokok - Selesai izin rokok\n"
-        "/pulang - Pulang kerja (wajib >=22:00)\n"
+        "/pulang - Pulang kerja (wajib ≥22:00)\n"
         "/laporan_bulanan [thn bln] - Laporan admin\n"
         "/nyanyi @user - (Admin) nyanyiin user\n"
         "/reset_hari_ini - (Admin) reset data izin hari ini"
@@ -496,11 +496,11 @@ async def set_commands(app: Application):
         BotCommand("absen_istirahat_siang", "Kembali dari istirahat siang (max 12:00)"),
         BotCommand("istirahat_sore_mulai", "Mulai istirahat sore (17:00-17:59)"),
         BotCommand("absen_istirahat_sore", "Kembali dari istirahat sore (max 18:00)"),
-        BotCommand("toilet", "Izin toilet (10 menit, max 6x/hari)"),
-        BotCommand("rokok", "Izin rokok (5 menit, max 6x/hari)"),
+        BotCommand("toilet", "Izin toilet 🚽 (10 menit, max 6x/hari)"),
+        BotCommand("rokok", "Izin rokok 🚬 (5 menit, max 6x/hari)"),
         BotCommand("selesai_toilet", "Selesai izin toilet"),
         BotCommand("selesai_rokok", "Selesai izin rokok"),
-        BotCommand("pulang", "Pulang kerja (wajib >=22:00)"),
+        BotCommand("pulang", "Pulang kerja (wajib ≥22:00)"),
         BotCommand("laporan_bulanan", "Laporan bulanan (admin)"),
         BotCommand("nyanyi", "(Admin) nyanyiin user"),
         BotCommand("reset_hari_ini", "(Admin) reset data izin hari ini"),
