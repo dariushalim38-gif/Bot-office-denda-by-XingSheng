@@ -3,7 +3,6 @@ import sqlite3
 import logging
 import random
 from datetime import datetime, timedelta
-from typing import Dict, List
 
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -21,13 +20,16 @@ JAM_PULANG = "22:00"
 UCAPAN_PULANG_LIST = ["✨ Kerja keras hari ini cukup ✨", "🚀 Pamit dulu, beban berat 😅", "😌 Hati lega, kerjaan beres", "🏃 Jalan-jalan ke Semanggi", "🎉 Saat melihat jam pulang, hatiku lega"]
 UCAPAN_TELAT_PAGI = ["🌅 Matahari sudah tinggi", "⏰ Telat nih", "🔔 Alarmnya disetel lebih awal"]
 UCAPAN_NYANYI = ["🎤 Nyiurin @{} : 'Balonku ada lima...'", "🎶 @{} dinyanyiin: 'Halo-halo Bandung'", "🎼 Untuk @{}: 'Ibu kita Kartini'"]
+
 DEFAULT_DURASI_WC = 10
 DEFAULT_DURASI_ROKOK = 5
 MAX_IZIN_PER_HARI = 6
 DB_PATH = "absen_bot.db"
 logging.basicConfig(level=logging.INFO)
 
-def parse_time(t): return datetime.strptime(t, "%H:%M").time()
+def parse_time(t):
+    return datetime.strptime(t, "%H:%M").time()
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -36,7 +38,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS izin_aktif (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, jenis TEXT, start_time TEXT, expected_end_time TEXT, chat_id INTEGER, durasi_menit INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS counter_harian (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, tanggal TEXT, jenis TEXT, jumlah INTEGER, UNIQUE(user_id, tanggal, jenis))''')
     c.execute('''CREATE TABLE IF NOT EXISTS chats (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER UNIQUE, chat_type TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS pulang_log (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, tanggal TEXT, UNIQUE(chat_id, tanggal))''')
     conn.commit()
     conn.close()
 
@@ -45,7 +46,8 @@ def get_or_create_user(u):
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE telegram_id = ?", (u.id,))
     row = c.fetchone()
-    if row: uid = row[0]
+    if row:
+        uid = row[0]
     else:
         c.execute("INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (?, ?, ?, ?)", (u.id, u.username, u.first_name, u.last_name))
         uid = c.lastrowid
@@ -75,29 +77,6 @@ def register_chat(cid, ctype):
     conn.commit()
     conn.close()
 
-def get_all_chats():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT chat_id FROM chats")
-    rows = c.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
-
-def sudah_kirim_pulang_today(cid, tgl):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT id FROM pulang_log WHERE chat_id = ? AND tanggal = ?", (cid, tgl))
-    ok = c.fetchone() is not None
-    conn.close()
-    return ok
-
-def catat_kirim_pulang(cid, tgl):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO pulang_log (chat_id, tanggal) VALUES (?, ?)", (cid, tgl))
-    conn.commit()
-    conn.close()
-
 def get_izin_count(uid, tgl, jenis):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -110,14 +89,6 @@ def increment_izin_count(uid, tgl, jenis):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO counter_harian (user_id, tanggal, jenis, jumlah) VALUES (?, ?, ?, 1) ON CONFLICT(user_id, tanggal, jenis) DO UPDATE SET jumlah = jumlah + 1", (uid, tgl, jenis))
-    conn.commit()
-    conn.close()
-
-def reset_counter_hari_ini_admin(tgl):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM counter_harian WHERE tanggal = ?", (tgl,))
-    c.execute("DELETE FROM izin_aktif")
     conn.commit()
     conn.close()
 
@@ -145,40 +116,11 @@ def remove_active_izin(izin_id):
     conn.commit()
     conn.close()
 
-active_timers = {}
-
-async def schedule_reminder(app, chat_id, user_id, username, jenis, durasi, izin_id, delay):
-    async def reminder():
-        await asyncio.sleep(delay)
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT id FROM izin_aktif WHERE id = ?", (izin_id,))
-        row = c.fetchone()
-        conn.close()
-        if row:
-            mention = f"@{username}" if username else f"User {user_id}"
-            await app.bot.send_message(chat_id=chat_id, text=f"{mention} ⏰ {jenis} {durasi} menit habis! Selesaikan segera.")
-    task = asyncio.create_task(reminder())
-    active_timers[user_id] = task
-
-async def restore_timers(app):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''SELECT izin.id, izin.jenis, izin.expected_end_time, izin.durasi_menit, izin.chat_id, users.telegram_id, users.username
-                 FROM izin_aktif izin JOIN users ON izin.user_id = users.id''')
-    rows = c.fetchall()
-    for izin_id, jenis, exp_str, durasi, chat_id, tgid, username in rows:
-        exp = datetime.fromisoformat(exp_str)
-        now = datetime.now()
-        if exp > now:
-            sisa = (exp - now).total_seconds()
-            await schedule_reminder(app, chat_id, tgid, username, jenis, durasi, izin_id, sisa)
-    conn.close()
-
 async def cmd_izin(update, context, jenis, default_dur, nama_izin, emoji):
     user = update.effective_user
     chat = update.effective_chat
-    if not user or not chat: return
+    if not user or not chat:
+        return
     uid = get_or_create_user(user)
     tgl = datetime.now().strftime("%Y-%m-%d")
     used = get_izin_count(uid, tgl, jenis)
@@ -205,15 +147,7 @@ async def cmd_izin(update, context, jenis, default_dur, nama_izin, emoji):
         f"Sisa kuota hari ini: {MAX_IZIN_PER_HARI - used -1}/{MAX_IZIN_PER_HARI}\n"
         f"Selesai? /selesai_{jenis}"
     )
-    if user.id in active_timers:
-        if not active_timers[user.id].done():
-            active_timers[user.id].cancel()
-        del active_timers[user.id]
-    await schedule_reminder(context.application, chat.id, user.id, user.username, nama_izin, durasi, izin_id, durasi*60)
     increment_izin_count(uid, tgl, jenis)
-
-async def cmd_WC(update, context): await cmd_izin(update, context, "WC", DEFAULT_DURASI_WC, "WC 🚽", "🚽")
-async def cmd_rokok(update, context): await cmd_izin(update, context, "rokok", DEFAULT_DURASI_ROKOK, "rokok 🚬", "🚬")
 
 async def cmd_selesai(update, context, jenis, nama_izin):
     user = update.effective_user
@@ -234,13 +168,15 @@ async def cmd_selesai(update, context, jenis, nama_izin):
     else:
         await update.message.reply_text(f"✅ {nama_izin.capitalize()} selesai tepat waktu.")
     remove_active_izin(izin_id)
-    if user.id in active_timers:
-        if not active_timers[user.id].done():
-            active_timers[user.id].cancel()
-        del active_timers[user.id]
 
-async def cmd_selesai_WC(update, context): await cmd_selesai(update, context, "WC", "WC")
-async def cmd_selesai_rokok(update, context): await cmd_selesai(update, context, "rokok", "rokok")
+async def cmd_WC(update, context):
+    await cmd_izin(update, context, "WC", DEFAULT_DURASI_WC, "WC 🚽", "🚽")
+async def cmd_rokok(update, context):
+    await cmd_izin(update, context, "rokok", DEFAULT_DURASI_ROKOK, "rokok 🚬", "🚬")
+async def cmd_selesai_WC(update, context):
+    await cmd_selesai(update, context, "WC", "WC")
+async def cmd_selesai_rokok(update, context):
+    await cmd_selesai(update, context, "rokok", "rokok")
 
 async def cmd_reset_hari_ini(update, context):
     user = update.effective_user
@@ -248,10 +184,12 @@ async def cmd_reset_hari_ini(update, context):
         await update.message.reply_text("⛔ Hanya admin.")
         return
     tgl = datetime.now().strftime("%Y-%m-%d")
-    reset_counter_hari_ini_admin(tgl)
-    for uid, task in list(active_timers.items()):
-        if not task.done(): task.cancel()
-    active_timers.clear()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM counter_harian WHERE tanggal = ?", (tgl,))
+    c.execute("DELETE FROM izin_aktif")
+    conn.commit()
+    conn.close()
     await update.message.reply_text(f"✅ Data {tgl} direset, izin aktif dibatalkan.")
 
 async def cmd_nyanyi(update, context):
@@ -267,7 +205,8 @@ async def cmd_nyanyi(update, context):
 
 async def cmd_start(update, context):
     chat = update.effective_chat
-    if chat: register_chat(chat.id, chat.type)
+    if chat:
+        register_chat(chat.id, chat.type)
     await update.message.reply_text(
         "🌟 Bot Absen & Denda 🌟\n\n"
         "/Absen_Pagi – Absen pagi (10:00)\n"
@@ -275,8 +214,8 @@ async def cmd_start(update, context):
         "/absen_istirahat_siang – Kembali siang\n"
         "/istirahat_sore_mulai – Mulai sore (17-18)\n"
         "/absen_istirahat_sore – Kembali sore\n"
-        "/WC 🚽 – Izin WC (10 menit, max 6/hari)\n"
-        "/rokok 🚬 – Izin rokok (5 menit, max 6/hari)\n"
+        "/WC – Izin WC (10 menit, max 6/hari)\n"
+        "/rokok – Izin rokok (5 menit, max 6/hari)\n"
         "/selesai_WC – Selesai WC\n"
         "/selesai_rokok – Selesai rokok\n"
         "/pulang – Pulang (≥22:00)\n"
@@ -287,7 +226,8 @@ async def cmd_start(update, context):
 
 async def cmd_Absen_Pagi(update, context):
     user = update.effective_user
-    if not user: return
+    if not user:
+        return
     uid = get_or_create_user(user)
     now = datetime.now()
     tgl = now.strftime("%Y-%m-%d")
@@ -320,8 +260,10 @@ async def cmd_mulai_istirahat(update, context, shift, mulai_str, selesai_str, na
     catat_absen(get_or_create_user(user), tgl, shift, now.isoformat(), "tepat")
     await update.message.reply_text(f"✅ {nama} mulai: {now.strftime('%H:%M:%S')}")
 
-async def cmd_istirahat_siang_mulai(update, context): await cmd_mulai_istirahat(update, context, "siang_mulai", ISTIRAHAT_1_MULAI, ISTIRAHAT_1_SELESAI, "Istirahat siang")
-async def cmd_istirahat_sore_mulai(update, context): await cmd_mulai_istirahat(update, context, "sore_mulai", ISTIRAHAT_2_MULAI, ISTIRAHAT_2_SELESAI, "Istirahat sore")
+async def cmd_istirahat_siang_mulai(update, context):
+    await cmd_mulai_istirahat(update, context, "siang_mulai", ISTIRAHAT_1_MULAI, ISTIRAHAT_1_SELESAI, "Istirahat siang")
+async def cmd_istirahat_sore_mulai(update, context):
+    await cmd_mulai_istirahat(update, context, "sore_mulai", ISTIRAHAT_2_MULAI, ISTIRAHAT_2_SELESAI, "Istirahat sore")
 
 async def cmd_kembali(update, context, shift, selesai_str, nama):
     user = update.effective_user
@@ -341,8 +283,10 @@ async def cmd_kembali(update, context, shift, selesai_str, nama):
     catat_absen(get_or_create_user(user), tgl, shift, now.isoformat(), status)
     await update.message.reply_text(f"✅ {nama}: {now.strftime('%H:%M:%S')} – {status.upper()}")
 
-async def cmd_absen_siang(update, context): await cmd_kembali(update, context, "siang", ISTIRAHAT_1_SELESAI, "Kembali siang")
-async def cmd_absen_sore(update, context): await cmd_kembali(update, context, "sore", ISTIRAHAT_2_SELESAI, "Kembali sore")
+async def cmd_absen_siang(update, context):
+    await cmd_kembali(update, context, "siang", ISTIRAHAT_1_SELESAI, "Kembali siang")
+async def cmd_absen_sore(update, context):
+    await cmd_kembali(update, context, "sore", ISTIRAHAT_2_SELESAI, "Kembali sore")
 
 async def cmd_pulang(update, context):
     now = datetime.now()
@@ -364,7 +308,10 @@ async def cmd_laporan_bulanan(update, context):
         skrg = datetime.now()
         tahun, bulan = skrg.year, skrg.month
     start = f"{tahun}-{bulan:02d}-01"
-    end = f"{tahun+1}-01-01" if bulan == 12 else f"{tahun}-{bulan+1:02d}-01"
+    if bulan == 12:
+        end = f"{tahun+1}-01-01"
+    else:
+        end = f"{tahun}-{bulan+1:02d}-01"
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, telegram_id, username, first_name FROM users")
@@ -382,18 +329,6 @@ async def cmd_laporan_bulanan(update, context):
     conn.close()
     await update.message.reply_text(laporan)
 
-async def daily_pulang_checker(app):
-    while True:
-        now = datetime.now()
-        jam_pulang = parse_time(JAM_PULANG)
-        if now.hour == jam_pulang.hour and now.minute == jam_pulang.minute:
-            tgl = now.strftime("%Y-%m-%d")
-            for cid in get_all_chats():
-                if not sudah_kirim_pulang_today(cid, tgl):
-                    await app.bot.send_message(chat_id=cid, text=f"🎉 Pulang kerja! {random.choice(UCAPAN_PULANG_LIST)}")
-                    catat_kirim_pulang(cid, tgl)
-        await asyncio.sleep(60)
-
 async def set_commands(app):
     await app.bot.set_my_commands([
         BotCommand("start", "Mulai"),
@@ -402,13 +337,13 @@ async def set_commands(app):
         BotCommand("absen_istirahat_siang", "Kembali siang max 12:00"),
         BotCommand("istirahat_sore_mulai", "Mulai sore 17:00"),
         BotCommand("absen_istirahat_sore", "Kembali sore max 18:00"),
-        BotCommand("WC", "Izin WC 🚽"),
-        BotCommand("rokok", "Izin rokok 🚬"),
+        BotCommand("WC", "Izin WC 10 menit"),
+        BotCommand("rokok", "Izin rokok 5 menit"),
         BotCommand("selesai_WC", "Selesai WC"),
         BotCommand("selesai_rokok", "Selesai rokok"),
         BotCommand("pulang", "Pulang kerja ≥22:00"),
         BotCommand("laporan_bulanan", "Laporan admin"),
-        BotCommand("nyanyi", "Admin nyanyi"),
+        BotCommand("nyanyi", "Admin nyanyi user"),
         BotCommand("reset_hari_ini", "Admin reset data"),
     ])
 
@@ -431,12 +366,10 @@ def main():
     app.add_handler(CommandHandler("reset_hari_ini", cmd_reset_hari_ini))
 
     async def post_init(app):
-        await restore_timers(app)
         await set_commands(app)
-        asyncio.create_task(daily_pulang_checker(app))
 
     app.post_init = post_init
-    print("🚀 Bot aktif")
+    print("Bot aktif")
     app.run_polling()
 
 if __name__ == "__main__":
